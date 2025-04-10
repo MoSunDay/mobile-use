@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createLogger } from '@/lib/utils/logger';
 import getExecutionManager from '@/lib/server/executionManager';
+import fs from 'fs/promises';
+import sharp from 'sharp';
 
 const logger = createLogger('API:Play');
 
@@ -25,6 +27,23 @@ export async function GET(request: NextRequest) {
 
   logger.info(`Setting up screen streaming for session: ${sessionId}`);
 
+  async function compressPngBuffer(inputBuffer) {
+    try {
+      const compressedBuffer = await sharp(inputBuffer)
+        .png({
+          compressionLevel: 9, // Maximum compression
+          adaptiveFiltering: true, // Enable adaptive filtering
+          palette: true, // Use palette-based output
+          quality: 80, // Set quality to 80
+        })
+        .toBuffer();
+      return compressedBuffer;
+    } catch (error) {
+      console.error('Error during compression:', error);
+      throw error;
+    }
+  }
+
   // Set up SSE headers
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -32,7 +51,7 @@ export async function GET(request: NextRequest) {
       try {
         // Function to send event to this client
         const sendEvent = (data: string) => {
-          controller.enqueue(encoder.encode(`data: data:image/jpeg;base64,${data}\n\n`));
+          controller.enqueue(encoder.encode(`data: data:image/png;base64,${data}\n\n`));
         };
 
         // Send initial connection message
@@ -41,7 +60,15 @@ export async function GET(request: NextRequest) {
         const sendScreenshots = async () => {
           try {
             const screenshot = await mobileContext.base64Screenshot();
-            sendEvent(screenshot);
+            const screenshotBuffer = Buffer.from(screenshot, 'base64');
+            const screenshotCompressed = await compressPngBuffer(screenshotBuffer);
+
+            // const timestamp = Date.now();
+            // const filePath = `tmp/screenshot-${timestamp}.png`;
+            // await fs.writeFile(filePath, screenshotCompressed);
+            // logger.info(`Screenshot saved to ${filePath}`);
+
+            sendEvent(screenshotCompressed.toString('base64'));
           } catch (error) {
             logger.error('Error capturing screenshot:', error);
             controller.error(error);
