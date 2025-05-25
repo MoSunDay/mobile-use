@@ -6,11 +6,22 @@ import { MobileState } from './types';
 import fs from 'fs/promises';
 const logger = createLogger('MobileContext');
 
+const TMP_DIR = 'tmp';
+
 export default class MobileContext {
   private driver: any;
   private cachedState: MobileState | undefined;
   constructor() {
     logger.info('MobileContext constructor');
+  }
+
+  private async ensureTmpDir() {
+    try {
+      await fs.mkdir(TMP_DIR, { recursive: true });
+      logger.info(`Ensured ${TMP_DIR} directory exists`);
+    } catch (err) {
+      logger.error(`Failed to ensure ${TMP_DIR} directory exists:`, err);
+    }
   }
 
   async init() {
@@ -34,6 +45,7 @@ export default class MobileContext {
       capabilities,
     };
 
+    await this.ensureTmpDir();
     // Connect to the Appium server
     logger.info('Connecting to Appium server...');
     this.driver = await remote(wdOpts);
