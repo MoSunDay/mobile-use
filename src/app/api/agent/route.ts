@@ -7,6 +7,8 @@ import { createLogger } from '@/lib/utils/logger';
 import getExecutionManager from '@/lib/server/ExecutionManager';
 import { AgentEvent } from '@/lib/agent/event/types';
 import Appium from '@/lib/mobile/appium';
+import { Platform, PlatformConfig } from '@/lib/mobile/types';
+import { platformConfigManager } from '@/lib/mobile/platformConfig';
 
 const logger = createLogger('API:Agent');
 
@@ -76,7 +78,7 @@ export async function POST(request: NextRequest) {
   try {
     logger.info('POST request received');
     const data = await request.json();
-    const { task, sessionId } = data;
+    const { task, sessionId, platformConfig } = data;
 
     if (!task || !sessionId) {
       return NextResponse.json({ error: 'Task and session ID are required' }, { status: 400 });
@@ -89,8 +91,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Session already exists' }, { status: 409 });
     }
 
-    // Initialize mobile context
-    const appium = new Appium();
+    // Initialize mobile context with platform configuration
+    let config: PlatformConfig | undefined;
+
+    if (platformConfig) {
+      // Use provided platform configuration
+      config = platformConfig;
+      platformConfigManager.setConfig(config);
+    } else {
+      // Auto-configure from environment or use default
+      platformConfigManager.autoConfigureFromEnvironment();
+      config = platformConfigManager.getCurrentConfig();
+    }
+
+    logger.info(`Initializing mobile context for platform: ${config.platform}`);
+    const appium = new Appium(config);
     const mobileContext = await appium.newContext();
 
     // Get the language model

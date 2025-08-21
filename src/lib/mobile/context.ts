@@ -1,8 +1,9 @@
 import { remote } from 'webdriverio';
-import { processPageSource } from './androidViewProcessor';
+import { processPageSource as processAndroidPageSource } from './androidViewProcessor';
+import { processPageSource as processIOSPageSource } from './iosViewProcessor';
 import { createLogger } from '@/lib/utils/logger';
 import { createElementsOverlay } from './canvasOverlay';
-import { MobileState } from './types';
+import { MobileState, Platform, PlatformConfig, MobileCapabilities } from './types';
 import fs from 'fs/promises';
 const logger = createLogger('MobileContext');
 
@@ -11,8 +12,52 @@ const TMP_DIR = 'tmp';
 export default class MobileContext {
   private driver: any;
   private cachedState: MobileState | undefined;
-  constructor() {
+  private platformConfig: PlatformConfig;
+
+  constructor(platformConfig?: PlatformConfig) {
     logger.info('MobileContext constructor');
+    // Default to Android if no config provided
+    this.platformConfig = platformConfig || this.getDefaultAndroidConfig();
+  }
+
+  private getDefaultAndroidConfig(): PlatformConfig {
+    return {
+      platform: Platform.ANDROID,
+      capabilities: {
+        platformName: 'Android',
+        'appium:automationName': 'UiAutomator2',
+        'appium:deviceName': 'Android Emulator',
+        'appium:noReset': true,
+        'appium:newCommandTimeout': 120,
+      },
+      host: process.env.APPIUM_HOST || 'localhost',
+      port: parseInt(process.env.APPIUM_PORT || '4723'),
+    };
+  }
+
+  private getDefaultIOSConfig(): PlatformConfig {
+    return {
+      platform: Platform.IOS,
+      capabilities: {
+        platformName: 'iOS',
+        'appium:automationName': 'XCUITest',
+        'appium:deviceName': 'iPhone Simulator',
+        'appium:platformVersion': '17.0',
+        'appium:noReset': true,
+        'appium:newCommandTimeout': 120,
+      },
+      host: process.env.APPIUM_HOST || 'localhost',
+      port: parseInt(process.env.APPIUM_PORT || '4723'),
+    };
+  }
+
+  public setPlatformConfig(config: PlatformConfig): void {
+    this.platformConfig = config;
+    logger.info(`Platform config set to: ${config.platform}`);
+  }
+
+  public getPlatform(): Platform {
+    return this.platformConfig.platform;
   }
 
   private async ensureTmpDir() {
@@ -25,29 +70,18 @@ export default class MobileContext {
   }
 
   async init() {
-    logger.info('MobileContext init');
-    // WebdriverIO remote capabilities for already installed app
-    const capabilities = {
-      platformName: 'Android',
-      'appium:automationName': 'UiAutomator2',
-      'appium:deviceName': 'Android Emulator', // Update this to match your device name or use 'Android Device' for physical devices
-      // Instead of app capability, use these for an already installed app:
-      // 'appium:appPackage': 'com.android.chrome', // app package
-      // 'appium:appActivity': 'com.android.chrome.MainActivity', // Replace with the actual main activity if different
-      'appium:noReset': true, // Keep app data between sessions
-      'appium:newCommandTimeout': 120, // Increase timeout for long-running commands
-    };
+    logger.info(`MobileContext init for platform: ${this.platformConfig.platform}`);
 
     const wdOpts = {
-      hostname: process.env.APPIUM_HOST || 'localhost',
-      port: parseInt(process.env.APPIUM_PORT || '4723'),
+      hostname: this.platformConfig.host || 'localhost',
+      port: this.platformConfig.port || 4723,
       logLevel: 'error' as const,
-      capabilities,
+      capabilities: this.platformConfig.capabilities,
     };
 
     await this.ensureTmpDir();
     // Connect to the Appium server
-    logger.info('Connecting to Appium server...');
+    logger.info(`Connecting to Appium server for ${this.platformConfig.platform}...`);
     this.driver = await remote(wdOpts);
   }
 
@@ -57,20 +91,22 @@ export default class MobileContext {
   }
 
   async getState(): Promise<MobileState> {
-    logger.info('MobileContext getState');
+    logger.info(`MobileContext getState for ${this.platformConfig.platform}`);
     const driver = this.driver;
     // Take a screenshot at the beginning
     const screenshotPath = 'tmp/state.png';
     await driver.saveScreenshot(screenshotPath);
     logger.info(`Saved initial screenshot to ${screenshotPath}`);
 
-    // Get page source to analyze the UI structure instead of using getViewHierarchy
+    // Get page source to analyze the UI structure
     logger.info('Getting page source to analyze UI elements...');
     const pageSource = await driver.getPageSource();
 
-    // Process the hierarchy data (no file operations)
+    // Process the hierarchy data based on platform
     logger.info('Optimizing view hierarchy...');
-    const { interactiveElements } = await processPageSource(pageSource);
+    const { interactiveElements } = this.platformConfig.platform === Platform.ANDROID
+      ? await processAndroidPageSource(pageSource)
+      : await processIOSPageSource(pageSource);
 
     // Create and save the overlay image
     logger.info('Creating element overlay...');
@@ -78,15 +114,32 @@ export default class MobileContext {
     await createElementsOverlay(screenshotPath, interactiveElements, overlayPath);
     //get base64 screenshot string from overlayPath
     const screenshotString = await this.getBase64String(overlayPath);
-    const currentApp = await driver.getCurrentPackage();
+
+    // Get current app based on platform
+    const currentApp = this.platformConfig.platform === Platform.ANDROID
+      ? await driver.getCurrentPackage()
+      : await this.getIOSCurrentApp(driver);
+
     const activeApps = ['']; //await driver.getAppList()?;
     this.cachedState = {
+      platform: this.platformConfig.platform,
       currentApp,
       activeApps,
       screenshot: screenshotString,
       interactiveElements,
     };
     return this.cachedState;
+  }
+
+  private async getIOSCurrentApp(driver: any): Promise<string> {
+    try {
+      // For iOS, we can get the bundle ID of the current app
+      const bundleId = await driver.getCurrentPackage();
+      return bundleId || 'Unknown iOS App';
+    } catch (error) {
+      logger.warn('Could not get iOS current app:', error);
+      return 'Unknown iOS App';
+    }
   }
 
   async base64Screenshot() {
@@ -103,32 +156,92 @@ export default class MobileContext {
 
   async clickElement(index: number) {
     const driver = this.driver;
-    // await driver.hideKeyboard(); //trick to make pointer click actions work?
     const element = this.cachedState?.interactiveElements[index];
     if (!element) {
       throw new Error(`Element at index ${index} not found`);
     }
-    const bounds = element.bounds!;
-    const x = bounds.x + bounds.width / 2;
-    const y = bounds.y + bounds.height / 2;
-    // Perform the tap action using the W3C Actions API
-    await driver.performActions([
-      {
-        type: 'pointer',
-        id: 'finger1',
-        parameters: { pointerType: 'touch' },
-        actions: [
-          { type: 'pointerMove', duration: 0, x: x, y: y },
-          { type: 'pointerDown', button: 0 },
-          { type: 'pointerUp', button: 0 },
-        ],
-      },
-    ]);
-    // Release the actions
-    await driver.releaseActions();
+
+    if (this.platformConfig.platform === Platform.ANDROID) {
+      // Android-specific click implementation
+      const bounds = element.bounds!;
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height / 2;
+
+      // Perform the tap action using the W3C Actions API
+      await driver.performActions([
+        {
+          type: 'pointer',
+          id: 'finger1',
+          parameters: { pointerType: 'touch' },
+          actions: [
+            { type: 'pointerMove', duration: 0, x: x, y: y },
+            { type: 'pointerDown', button: 0 },
+            { type: 'pointerUp', button: 0 },
+          ],
+        },
+      ]);
+      await driver.releaseActions();
+    } else {
+      // iOS-specific click implementation
+      try {
+        // Try to find element by accessibility attributes first
+        let iosElement = null;
+
+        if (element.attributes['name']) {
+          iosElement = await driver.$(`*[name="${element.attributes['name']}"]`);
+        } else if (element.attributes['label']) {
+          iosElement = await driver.$(`*[label="${element.attributes['label']}"]`);
+        } else if (element.attributes['value']) {
+          iosElement = await driver.$(`*[value="${element.attributes['value']}"]`);
+        }
+
+        if (iosElement && await iosElement.isExisting()) {
+          await iosElement.click();
+        } else {
+          // Fallback to coordinate-based click
+          const bounds = element.bounds!;
+          const x = bounds.x + bounds.width / 2;
+          const y = bounds.y + bounds.height / 2;
+
+          await driver.performActions([
+            {
+              type: 'pointer',
+              id: 'finger1',
+              parameters: { pointerType: 'touch' },
+              actions: [
+                { type: 'pointerMove', duration: 0, x: x, y: y },
+                { type: 'pointerDown', button: 0 },
+                { type: 'pointerUp', button: 0 },
+              ],
+            },
+          ]);
+          await driver.releaseActions();
+        }
+      } catch (error) {
+        logger.warn('iOS click failed, falling back to coordinates:', error);
+        // Coordinate-based fallback
+        const bounds = element.bounds!;
+        const x = bounds.x + bounds.width / 2;
+        const y = bounds.y + bounds.height / 2;
+
+        await driver.performActions([
+          {
+            type: 'pointer',
+            id: 'finger1',
+            parameters: { pointerType: 'touch' },
+            actions: [
+              { type: 'pointerMove', duration: 0, x: x, y: y },
+              { type: 'pointerDown', button: 0 },
+              { type: 'pointerUp', button: 0 },
+            ],
+          },
+        ]);
+        await driver.releaseActions();
+      }
+    }
 
     await driver.pause(500);
-    logger.info(`Clicked element at index ${index}`);
+    logger.info(`Clicked element at index ${index} on ${this.platformConfig.platform}`);
   }
 
   async inputText(index: number, text: string) {
@@ -137,25 +250,92 @@ export default class MobileContext {
     if (!element) {
       throw new Error(`Element at index ${index} not found`);
     }
-    const bounds = element.bounds!;
-    const x = bounds.x + bounds.width / 2;
-    const y = bounds.y + bounds.height / 2;
-    await driver.performActions([
-      {
-        type: 'pointer',
-        id: 'finger1',
-        parameters: { pointerType: 'touch' },
-        actions: [
-          { type: 'pointerMove', duration: 0, x: x, y: y },
-          { type: 'pointerDown', button: 0 },
-          { type: 'pointerUp', button: 0 },
-        ],
-      },
-    ]);
-    await driver.releaseActions();
-    await driver.keys(text);
+
+    if (this.platformConfig.platform === Platform.ANDROID) {
+      // Android-specific input implementation
+      const bounds = element.bounds!;
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height / 2;
+
+      await driver.performActions([
+        {
+          type: 'pointer',
+          id: 'finger1',
+          parameters: { pointerType: 'touch' },
+          actions: [
+            { type: 'pointerMove', duration: 0, x: x, y: y },
+            { type: 'pointerDown', button: 0 },
+            { type: 'pointerUp', button: 0 },
+          ],
+        },
+      ]);
+      await driver.releaseActions();
+      await driver.keys(text);
+    } else {
+      // iOS-specific input implementation
+      try {
+        // Try to find element by accessibility attributes first
+        let iosElement = null;
+
+        if (element.attributes['name']) {
+          iosElement = await driver.$(`*[name="${element.attributes['name']}"]`);
+        } else if (element.attributes['label']) {
+          iosElement = await driver.$(`*[label="${element.attributes['label']}"]`);
+        } else if (element.attributes['value']) {
+          iosElement = await driver.$(`*[value="${element.attributes['value']}"]`);
+        }
+
+        if (iosElement && await iosElement.isExisting()) {
+          await iosElement.click();
+          await iosElement.clearValue();
+          await iosElement.setValue(text);
+        } else {
+          // Fallback to coordinate-based input
+          const bounds = element.bounds!;
+          const x = bounds.x + bounds.width / 2;
+          const y = bounds.y + bounds.height / 2;
+
+          await driver.performActions([
+            {
+              type: 'pointer',
+              id: 'finger1',
+              parameters: { pointerType: 'touch' },
+              actions: [
+                { type: 'pointerMove', duration: 0, x: x, y: y },
+                { type: 'pointerDown', button: 0 },
+                { type: 'pointerUp', button: 0 },
+              ],
+            },
+          ]);
+          await driver.releaseActions();
+          await driver.keys(text);
+        }
+      } catch (error) {
+        logger.warn('iOS input failed, falling back to coordinates:', error);
+        // Coordinate-based fallback
+        const bounds = element.bounds!;
+        const x = bounds.x + bounds.width / 2;
+        const y = bounds.y + bounds.height / 2;
+
+        await driver.performActions([
+          {
+            type: 'pointer',
+            id: 'finger1',
+            parameters: { pointerType: 'touch' },
+            actions: [
+              { type: 'pointerMove', duration: 0, x: x, y: y },
+              { type: 'pointerDown', button: 0 },
+              { type: 'pointerUp', button: 0 },
+            ],
+          },
+        ]);
+        await driver.releaseActions();
+        await driver.keys(text);
+      }
+    }
+
     await driver.pause(500);
-    logger.info(`Input text into element at index ${index}`);
+    logger.info(`Input text into element at index ${index} on ${this.platformConfig.platform}`);
   }
 
   async scrollDown(amount: number) {
@@ -215,11 +395,34 @@ export default class MobileContext {
 
   async scrollToText(text: string) {
     const driver = this.driver;
-    // Scroll to the element with text "Target Element"
-    await driver.$(
-      `android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().text("${text}"))`
-    );
+
+    if (this.platformConfig.platform === Platform.ANDROID) {
+      // Android-specific scroll to text
+      await driver.$(
+        `android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().text("${text}"))`
+      );
+    } else {
+      // iOS-specific scroll to text
+      try {
+        // For iOS, we need to find the element and scroll to it
+        const element = await driver.$(`*[name="${text}"]`);
+        if (await element.isExisting()) {
+          await driver.execute('mobile: scroll', { element: element.elementId, toVisible: true });
+        } else {
+          // If element not found by name, try by label
+          const labelElement = await driver.$(`*[label="${text}"]`);
+          if (await labelElement.isExisting()) {
+            await driver.execute('mobile: scroll', { element: labelElement.elementId, toVisible: true });
+          }
+        }
+      } catch (error) {
+        logger.warn(`Could not scroll to text "${text}" on iOS:`, error);
+        // Fallback to manual scroll
+        await this.scrollDown(1);
+      }
+    }
+
     await driver.pause(500);
-    logger.info(`Scrolled to text ${text}`);
+    logger.info(`Scrolled to text ${text} on ${this.platformConfig.platform}`);
   }
 }

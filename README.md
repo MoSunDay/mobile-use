@@ -7,11 +7,13 @@ Perform mobile tasks using natural language instructions.
 ## Features
 
 - **Multi-Agent System**: Uses three specialized agents (Planner, Navigator, and Validator) to complete mobile tasks
+- **Cross-Platform Support**: Works with both Android and iOS devices/simulators
 - **Mobile Automation**: Integrates with Appium for reliable mobile device automation
 - **Streaming Responses**: Provides real-time feedback as agents work on tasks
 - **Configurable Models**: Allows different LLM models for each agent type
 - **Provider Support**: Works with OpenAI, Anthropic, and other LLM providers
 - **Structured Logging**: Comprehensive logging system with namespaces for debugging and monitoring
+- **Platform Detection**: Automatic platform detection and configuration
 
 ## Architecture
 
@@ -23,13 +25,23 @@ Perform mobile tasks using natural language instructions.
 
 ### Mobile Automation
 
-The application uses Appium for mobile automation, providing these capabilities:
+The application uses Appium for cross-platform mobile automation, providing these capabilities:
 
+**Android Support (UiAutomator2):**
 - App launching and navigation
 - Tapping on UI elements
-- Text input
-- Scrolling
+- Text input and keyboard handling
+- Scrolling and gestures
 - Taking screenshots
+- Element identification via resource-id, text, content-desc
+
+**iOS Support (XCUITest):**
+- App launching and navigation
+- Tapping on UI elements
+- Text input and keyboard handling
+- Scrolling and gestures
+- Taking screenshots
+- Element identification via name, label, accessibility attributes
 
 ### Logging
 
@@ -47,7 +59,18 @@ The application includes a structured logging system that:
 
 - Node.js 20+
 - Appium server
-- A connected mobile device or emulator/simulator to appium
+- A connected mobile device or emulator/simulator
+
+**For Android:**
+- Android SDK and ADB
+- Android emulator or physical device
+- UiAutomator2 driver
+
+**For iOS:**
+- Xcode (macOS only)
+- iOS Simulator or physical device
+- XCUITest driver
+- For physical devices: proper provisioning profiles and certificates
 
 ### Installation
 
@@ -56,9 +79,16 @@ The application includes a structured logging system that:
    ```
    npm install
    ```
-3. Set up Appium:
-   ```
+3. Set up Appium drivers:
+   ```bash
+   # For Android only
    npm run setup:appium
+
+   # For iOS only
+   npm run setup:appium:ios
+
+   # For both platforms
+   npm run setup:appium:all
    ```
 4. Set up environment variables:
 
@@ -77,6 +107,20 @@ The application includes a structured logging system that:
    # Mobile Testing Configuration
    APPIUM_PORT=4723
    APPIUM_HOST=localhost
+
+   # Platform Configuration (optional)
+   MOBILE_PLATFORM=Android  # or iOS
+
+   # Android Configuration (optional)
+   ANDROID_DEVICE_NAME=Android Emulator
+   ANDROID_APP_PACKAGE=com.example.app
+   ANDROID_APP_ACTIVITY=.MainActivity
+
+   # iOS Configuration (optional)
+   IOS_DEVICE_NAME=iPhone Simulator
+   IOS_PLATFORM_VERSION=17.0
+   IOS_BUNDLE_ID=com.example.app
+   IOS_UDID=your-device-udid
    ```
 
 5. Start Appium server:
@@ -114,10 +158,37 @@ The application includes a structured logging system that:
 
 ### Configuration
 
-1. Click the settings icon in the top right corner
-2. Select your preferred provider and models
-3. Configure device capabilities
-4. Save your settings
+1. **Platform Setup**: Choose your target platform (Android or iOS)
+2. **LLM Configuration**: Click the settings icon in the top right corner
+3. Select your preferred provider and models
+4. Configure device capabilities and platform-specific settings
+5. Save your settings
+
+### Platform Configuration
+
+The application automatically detects the platform from environment variables, but you can also configure it manually:
+
+**Via Environment Variables:**
+```bash
+export MOBILE_PLATFORM=iOS
+export IOS_DEVICE_NAME="iPhone 15 Pro"
+export IOS_PLATFORM_VERSION="17.0"
+```
+
+**Via API:**
+```bash
+# Set to iOS
+curl -X POST http://localhost:3000/api/platform \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "iOS", "deviceName": "iPhone Simulator", "platformVersion": "17.0"}'
+
+# Set to Android
+curl -X POST http://localhost:3000/api/platform \
+  -H "Content-Type: application/json" \
+  -d '{"platform": "Android", "deviceName": "Pixel 7 Emulator"}'
+```
+
+**Via UI:** Use the Platform Selector component in the application interface.
 
 ## Usage
 
@@ -128,10 +199,22 @@ The application includes a structured logging system that:
 
 ## Examples
 
+**Android Examples:**
 - "Open the Settings app and turn on Airplane mode"
 - "Launch Chrome and search for the weather"
 - "Open the contacts app and create a new contact"
+- "Navigate to Developer Options and enable USB Debugging"
+
+**iOS Examples:**
+- "Open Settings and turn on Do Not Disturb"
+- "Launch Safari and search for the weather"
+- "Open Contacts and create a new contact"
+- "Go to Settings > Privacy & Security and review app permissions"
+
+**Cross-Platform Examples:**
 - "Take a screenshot of the home screen"
+- "Open the calculator app and calculate 2+2"
+- "Find and open the camera app"
 
 ## Testing
 
