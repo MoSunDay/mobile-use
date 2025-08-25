@@ -1,0 +1,87 @@
+# Mobile Use MCP .dockerignore
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# Build output
+output/
+bin/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Docker
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README*.md
+docs/
+
+# Test files
+*_test.go
+test/
+tests/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Build scripts
+build*.sh
+run.sh
+
+# Client examples
+client/
+examples/
+
+# Coverage
+coverage.out
+coverage.html
+
+# Vendor (if using)
+vendor/
+
+# Air (live reload tool)
+.air.toml
+tmp/
